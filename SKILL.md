@@ -1,8 +1,8 @@
 ---
-name: svg-studio
+name: SVG绘图工作台-智能生图
 slug: svg-studio
-displayName: SVG Studio
-version: 1.1.0
+displayName: SVG绘图工作台-智能生图
+version: 1.2.0
 description: |
   用「编写 SVG」的方式生成图片——让没有多模态生图能力的模型也能产出任意宽高比、任意复杂度的矢量图，并导出为 SVG / PNG / 动图(GIF/APNG/WebP/MP4)，或内嵌进 HTML。
   适用场景：用户要「生成一张图 / 画个图 / 做张配图 / 做海报 / 信息图 / 图表 / 流程图 / 架构图 / 图标 / 封面 / OG 图」，要求指定宽高比(16:9 / 1:1 / 9:16 等)或导出 PNG；也包括「做个动图 / GIF / 加载动画 / loading 动效」。
@@ -14,7 +14,7 @@ disable: false
 agent_created: true
 ---
 
-# svg-studio
+# SVG绘图工作台-智能生图
 
 让模型「写代码画图」：用 SVG 表达任意复杂的图形，再渲染成 PNG / 动图，或内嵌 HTML。
 **核心理念**：SVG 是纯文本，模型完全可控；PNG/动图只是它的「导出格式」。
@@ -75,7 +75,7 @@ $PY scripts/render.py chart.svg --width 1600
 $PY scripts/render.py chart.svg --html chart.html
 ```
 
-参数：`--scale`(DPR,默认2) `--width/--height`(强制尺寸) `--bg`(transparent 或 #色值) `--engine`(auto/chrome/cairosvg/resvg) `--html`。
+参数：`--scale`(DPR,默认2) `--width/--height`(强制尺寸) `--bg`(transparent 或 #色值，**全引擎生效**：Chrome/resvg/cairosvg 都吃) `--engine`(auto/chrome/cairosvg/resvg) `--html`。
 
 ## Step 4 — 生成动图（需要动效时）
 
@@ -97,7 +97,8 @@ $PY scripts/animate.py --frames-dir ./frames -o out.webp --fps 24 --loop 0
 ```
 
 输出格式由扩展名决定：`.gif`(256 色,通用) `.webp`(更小更清晰) `.apng/.png`(无损含 alpha) `.mp4`(需 ffmpeg)。
-参数：`--fps` `--loop`(0=无限) `--scale/--width`(帧清晰度) `--bg`(GIF 建议实底) `--quality`(webp)。
+参数：`--fps` `--loop`(0=无限) `--scale/--width`(帧清晰度) `--bg`(GIF 的 matte 也用它，深色底不会再出白边) `--quality`(webp)。
+帧渲染**自动并行**（首帧预热、其余多进程并发），30 帧从 ~30s 提到 ~5s 量级。
 
 ## Step 5 — 验证（必做，第 5 条闭环自检）
 
@@ -118,8 +119,8 @@ file out.png        # 确认 PNG image data, W x H
   - 浏览器路径：自动探测 Chrome/Edge/Brave/Chromium（Mac Applications 目录 + Windows Program Files + PATH which）。
   - venv 路径：自动按平台选 `bin/python`（Unix）或 `Scripts/python.exe`（Windows）。
   - Python 候选：优先 WorkBuddy managed python，fallback 到系统 python.org 安装、Homebrew、Windows 默认路径等。
-  - Windows 上 Chrome headless 的 `--no-sandbox` 和 `--disable-gpu` 均正常工作，无需额外配置。
-- **渲染引擎依赖**：Chrome 路径自动探测（Mac/Win 常见位置）；没有 Chrome 时自动用 Python 引擎，顺序 resvg→cairosvg。**resvg 是自带 wheel、零系统依赖**，优先；cairosvg 需要本机装了 libcairo（`brew install cairo` / `apt install libcairo2`），没装会报 `cannot load library 'libcairo-2'`，此时自动落到 resvg。
+  - Windows 上 Chrome headless 的 `--no-sandbox` 和 `--disable-gpu` 均正常工作，无需额外配置；MP4 合成在无符号链接权限时自动改用文件拷贝。
+- **渲染引擎依赖**：Chrome 路径自动探测（Mac/Win 常见位置）；Chrome headless 每次渲染用独立临时 profile，**不会与你正开着的 Chrome 抢锁**，也支持多帧并行渲染。没有 Chrome 时自动用 Python 引擎，顺序 resvg→cairosvg。**resvg 是自带 wheel、零系统依赖**，优先；cairosvg 需要本机装了 libcairo（`brew install cairo` / `apt install libcairo2`），没装会报 `cannot load library 'libcairo-2'`，此时自动落到 resvg。
 - **Python 原生库的隔离 venv 在 `.venv/`（skill 目录内）**，由脚本首次运行时自动用「系统 Python」创建并装 Pillow/cairosvg。**不要用 managed python 直接 import 这些库**——managed python 的 hardened runtime 会因 Team ID 不匹配拒绝加载第三方 .so（实测报 `code signature ... different Team IDs`）。脚本已自动处理：用系统 Python 建 venv 并 re-exec，调用方无感。**Windows 无此限制**（无 Team ID 签名机制），managed python 可直接用。
 - `.venv/` 不要打包进 skill 分发；它是本机运行时缓存。
 - 更多坑见 `references/svg-techniques.md` 和 `svg-to-png-chrome` skill（后者是纯 Chrome 转换路线，本 skill 的渲染思路与之兼容）。

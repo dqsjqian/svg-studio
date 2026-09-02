@@ -150,7 +150,7 @@ def build_frames_from_template(template_path, n, work):
     return out
 
 
-def save_animation(png_paths, out_path, fps, loop, quality):
+def save_animation(png_paths, out_path, fps, loop, quality, bg="#ffffff"):
     from PIL import Image
     duration = int(round(1000.0 / fps))  # ms per frame
     ext = os.path.splitext(out_path)[1].lower()
@@ -161,12 +161,14 @@ def save_animation(png_paths, out_path, fps, loop, quality):
     frames = [f if f.size == base_size else f.resize(base_size) for f in frames]
 
     if ext == ".gif":
-        # GIF needs palette; flatten alpha on a chosen matte (white)
+        # GIF needs palette; flatten alpha on the requested matte (not a
+        # hardcoded white — a colored bg must not bleed white halos).
+        matte = bg if bg not in (None, "transparent", "none") else "#ffffff"
         rgb = []
         for f in frames:
-            bg = Image.new("RGBA", f.size, (255, 255, 255, 255))
-            bg.alpha_composite(f)
-            rgb.append(bg.convert("P", palette=Image.ADAPTIVE, colors=256))
+            m = Image.new("RGBA", f.size, matte)
+            m.alpha_composite(f)
+            rgb.append(m.convert("P", palette=Image.ADAPTIVE, colors=256))
         rgb[0].save(out_path, save_all=True, append_images=rgb[1:],
                     duration=duration, loop=loop, disposal=2, optimize=True)
     elif ext == ".webp":
@@ -181,14 +183,19 @@ def save_animation(png_paths, out_path, fps, loop, quality):
 
 
 def save_mp4(png_paths, out_path, fps):
-    import shutil
-    ff = shutil.which("ffmpeg")
+    import shutil as _shutil
+    ff = _shutil.which("ffmpeg")
     if not ff:
         log("[mp4] ffmpeg not found on PATH. Install ffmpeg or choose .gif/.webp.")
         return False
     with tempfile.TemporaryDirectory() as td:
         for i, p in enumerate(png_paths):
-            os.symlink(os.path.abspath(p), os.path.join(td, "f%05d.png" % i))
+            dst = os.path.join(td, "f%05d.png" % i)
+            try:
+                os.symlink(os.path.abspath(p), dst)
+            except OSError:
+                # Windows without Developer Mode: symlinks need privileges.
+                _shutil.copyfile(p, dst)
         cmd = [ff, "-y", "-framerate", str(fps), "-i", os.path.join(td, "f%05d.png"),
                "-pix_fmt", "yuv420p", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
                out_path]
@@ -228,18 +235,30 @@ def main():
             return 2
         log("[animate] %d frames" % len(svgs))
 
-        # 2. render each to PNG
-        pngs = []
-        for i, s in enumerate(svgs):
-            png = os.path.join(work, "out-%04d.png" % i)
-            if not render_svg_to_png(s, png, args.scale, args.width, args.bg):
+        # 2. render each frame to PNG. First frame runs alone (warms up the
+        # engine choice + any venv/pip setup, avoiding concurrent pip races);
+        # the rest render in parallel — each render.py gets its own Chrome
+        # profile dir, so concurrent headless runs are safe.
+        pngs = [os.path.join(work, "out-%04d.png" % i) for i in range(len(svgs))]
+        jobs = list(zip(svgs, pngs))
+        if not render_svg_to_png(jobs[0][0], jobs[0][1], args.scale, args.width, args.bg):
+            return 3
+        rest = jobs[1:]
+        max_workers = min(8, os.cpu_count() or 4)
+        if rest and max_workers > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            log("[animate] rendering %d frames on %d workers ..." % (len(rest), max_workers))
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                results = list(pool.map(
+                    lambda j: render_svg_to_png(j[0], j[1], args.scale, args.width, args.bg),
+                    rest))
+            if not all(results):
                 return 3
-            pngs.append(png)
 
         # 3. compose
         ext = os.path.splitext(args.output)[1].lower()
         ok = save_mp4(pngs, args.output, args.fps) if ext == ".mp4" \
-            else save_animation(pngs, args.output, args.fps, args.loop, args.quality)
+            else save_animation(pngs, args.output, args.fps, args.loop, args.quality, args.bg)
         if not ok:
             log("ERROR: failed to write %s" % args.output)
             return 4

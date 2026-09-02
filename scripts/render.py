@@ -104,11 +104,20 @@ def render_chrome(svg_text, out_png, out_w, out_h, bg, browser):
         html_path = os.path.join(td, "page.html")
         with open(html_path, "w", encoding="utf-8") as f:
             f.write(html)
+        # Per-invocation user-data-dir: avoids the default-profile singleton
+        # lock (conflicts with a running GUI Chrome or parallel renders).
+        profile = os.path.join(td, "profile")
         # transparent background flag: 00000000 = fully transparent
         default_bg = "00000000" if bg in (None, "transparent", "none") else "ffffffff"
         cmd = [
             browser, "--headless", "--disable-gpu", "--no-sandbox",
+            "--user-data-dir=%s" % profile,
+            "--no-first-run", "--no-default-browser-check",
+            "--disable-extensions", "--disable-sync",
+            "--disable-background-networking", "--disable-component-update",
+            "--password-store=basic", "--use-mock-keychain",
             "--force-device-scale-factor=1",
+            "--virtual-time-budget=3000",
             "--window-size=%d,%d" % (int(round(out_w)), int(round(out_h))),
             "--default-background-color=%s" % default_bg,
             "--hide-scrollbars",
@@ -117,10 +126,34 @@ def render_chrome(svg_text, out_png, out_w, out_h, bg, browser):
         ]
         last_err = ""
         for attempt in range(3):
-            proc = subprocess.run(cmd, capture_output=True, text=True)
-            if os.path.exists(out_png) and os.path.getsize(out_png) > 0:
+            # Chrome --headless=new with a fresh profile often writes the PNG
+            # then lingers without exiting. So: watch for the file instead of
+            # waiting for process exit, then kill the process ourselves.
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE)
+            ok = False
+            deadline = time.time() + 45
+            while time.time() < deadline:
+                if proc.poll() is not None:  # exited on its own
+                    if os.path.exists(out_png) and os.path.getsize(out_png) > 0:
+                        ok = True
+                    break
+                if os.path.exists(out_png) and os.path.getsize(out_png) > 0:
+                    time.sleep(0.3)  # let it finish flushing
+                    ok = os.path.getsize(out_png) > 0
+                    break
+                time.sleep(0.2)
+            try:
+                proc.kill()
+            except OSError:
+                pass
+            try:
+                out, err = proc.communicate(timeout=5)
+                last_err = ((err or out) or b"").decode("utf-8", "replace").strip()
+            except Exception:
+                pass
+            if ok:
                 return True
-            last_err = (proc.stderr or proc.stdout or "").strip()
             # macOS mach port rendezvous race -> retry
             time.sleep(0.6)
         log("[chrome] failed after retries: %s" % last_err[-400:])
@@ -215,12 +248,14 @@ def render_resvg(svg_path, out_png, out_w, out_h, bg):
     if chk.returncode != 0:
         if not pip_install("resvg-py"):
             return False
-    # resvg_py renders at the SVG's own size; we scale via width.
+    # resvg_py renders at the SVG's own size; we scale via width/height.
+    # background: only when a solid color was requested (None keeps alpha).
+    bg_arg = None if bg in (None, "transparent", "none") else str(bg)
     code = (
         "import resvg_py;"
-        "png=resvg_py.svg_to_bytes(svg_path=%r, width=%d);"
+        "png=resvg_py.svg_to_bytes(svg_path=%r, width=%d, height=%d, background=%r);"
         "open(%r,'wb').write(png)"
-        % (svg_path, int(round(out_w)), out_png)
+        % (svg_path, int(round(out_w)), int(round(out_h)), bg_arg, out_png)
     )
     r = subprocess.run([py, "-c", code], capture_output=True, text=True)
     if os.path.exists(out_png) and os.path.getsize(out_png) > 0:
