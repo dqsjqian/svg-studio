@@ -1,6 +1,6 @@
 # SVG Studio
 
-**让任何 LLM 都能「写代码画图」** —— 用编写 SVG 的方式生成任意宽高比、任意复杂度的矢量图，导出 PNG / GIF / APNG / WebP / MP4，或直接内嵌 HTML。
+**让任何 LLM 都能「写代码画图」** —— 用编写 SVG 的方式生成任意宽高比、任意复杂度的矢量图，按需导出 PNG / GIF / APNG / WebP / MP4，或直接内嵌 HTML。**默认交付到 SVG 为止，位图只在用户点名时导出。**
 
 一个 Skill（技能包），适用于 WorkBuddy / Claude Code / Claw 等支持 SKILL.md 规范的 Agent 运行时。
 
@@ -21,8 +21,10 @@
 
 ## 快速开始
 
+默认工作流：写好 SVG 存 `.svg` 即为交付物，到此为止。需要位图 / 动图文件时：
+
 ```bash
-# 渲染 PNG（默认 2x DPR，Chrome 优先，自动降级）
+# 按需渲染 PNG（默认 2x DPR，Chrome 优先，自动降级）
 python3 scripts/render.py poster.svg
 
 # 指定宽度、实底背景、顺带产出 HTML

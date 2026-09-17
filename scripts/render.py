@@ -3,9 +3,10 @@
 render.py — Render an SVG file to PNG (or wrap into a standalone HTML).
 
 Rendering strategy (in priority order, auto-fallback):
-  1. headless Chrome / Chromium / Edge  -> best fidelity (gradients, filters, fonts)
-  2. Python cairosvg                     -> cross-platform, no browser needed
-  3. Python resvg (via `resvg-py`)       -> fast, accurate, good fallback
+  1. headless Chrome / Chromium / Edge   -> best fidelity (gradients, filters, fonts)
+  2. Python resvg (via `resvg-py`)       -> fast, no browser; degrades heavy
+     hand-drawn filters (feTurbulence+feDisplacementMap over-blurs text)
+  3. Python cairosvg                     -> cross-platform, no browser needed
 
 The script auto-derives output dimensions from the SVG viewBox / width-height,
 multiplied by --scale (DPR). Supports transparent or solid background.
@@ -266,7 +267,7 @@ def render_resvg(svg_path, out_png, out_w, out_h, bg):
 
 # ---------------------------------------------------------------------------
 def main():
-    ap = argparse.ArgumentParser(description="Render SVG -> PNG (Chrome-first, Python fallback)")
+    ap = argparse.ArgumentParser(description="Render SVG -> PNG (Chrome-first fidelity, resvg/cairosvg no-browser fallback)")
     ap.add_argument("input", help="input .svg file")
     ap.add_argument("-o", "--output", help="output .png path (default: alongside input)")
     ap.add_argument("--scale", type=float, default=2.0, help="DPR multiplier (default 2.0)")
@@ -308,8 +309,10 @@ def main():
     # Engine selection
     order = []
     if args.engine == "auto":
-        # resvg before cairosvg: resvg ships a self-contained wheel (no system
-        # libcairo needed), so it is a more reliable fallback when Chrome absent.
+        # Chrome first: fidelity king (verified 2026-09-17 side-by-side — resvg
+        # over-applies feDisplacementMap, blurring hand-drawn filter text).
+        # resvg is the reliable no-browser fallback (self-contained wheel, no
+        # system libcairo); cairosvg last (needs libcairo installed).
         order = ["chrome", "resvg", "cairosvg"]
     else:
         order = [args.engine]
